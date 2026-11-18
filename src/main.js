@@ -528,6 +528,41 @@ function toneCheck(promptText, onResult, onCancel) {
   }, 900);
 }
 
+/* ---------- Free talk: speech-to-text (browser) + character replies (Gemini via our relay) ---------- */
+function listenOnce() {
+  return new Promise((resolve, reject) => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return reject(new Error('speech recognition not supported in this browser'));
+    const rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    let done = false;
+    rec.onresult = e => { done = true; resolve(e.results[0][0].transcript); };
+    rec.onerror = e => { if (!done) reject(new Error(e.error || 'mic error')); };
+    rec.onend = () => { if (!done) reject(new Error('no speech heard')); };
+    rec.start();
+  });
+}
+function freeTalk(who, next, retry) {
+  const history = [];
+  let turns = 0;
+  const name = who === 'leo' ? 'Leo' : 'Maya';
+  const turn = () => {
+    clearButtons();
+    drawPanel('guide', `🎤 Speak to ${name} now — say anything…`);
+    listenOnce().then(text => {
+      drawPanel('guide', `You: "${text}"  ·  ${name} is thinking…`);
+      return fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ character: who, history, message: text }) })
+        .then(r => r.json().then(d => { if (!r.ok) throw new Error(d.error || 'chat unavailable'); return { text, reply: d.reply }; }));
+    }).then(({ text, reply }) => {
+      history.push({ role: 'user', text }, { role: 'model', text: reply }); turns++;
+      say(who, reply, [
+        { label: '🎤 Reply', color: '#2f856a', action: turn },
+        { label: turns >= 2 ? 'Finish conversation' : 'End here', action: next }
+      ]);
+    }).catch(err => say('guide', `Free talk is unavailable right now (${err.message}). You can use the choices instead.`, [{ label: 'Back to choices', action: retry }, { label: 'Continue', action: next }]));
+  };
+  turn();
+}
+
 function checkIn() {
   say('therapist', 'Before we start — how are you arriving today?', [
     { label: '🎙 Say it out loud (Tone Coach)', color: '#2f856a', action: () => toneCheck('Tell me how you are feeling today', r => {
@@ -592,6 +627,7 @@ function mayaHint() {
 }
 function mayaRespond() {
   say('therapist', 'Now, how would you like to respond to Maya?', [
+    { label: '💬 Talk freely with Maya', color: '#2f856a', action: () => freeTalk('maya', () => { maya.userData.mood = 1; save.trust.maya += 1; writeSave(); mayaDebrief(); }, mayaRespond) },
     { label: '🎙 Say it out loud to Maya', color: '#2f856a', action: () => toneCheck('Say something gentle to Maya, like: you seem a bit nervous, want to slow down?', r => {
       const top = (r.expressions || []).map(e => e.name).join(' ') + ' ' + (r.voice || []).map(e => e.name).join(' ');
       const gentle = STEADY.test(top) && !/anger|annoy|contempt|harsh|loud|tense/i.test(top);
