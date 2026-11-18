@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body });
       const data = await r.json().catch(() => ({}));
-      if (r.status === 404) continue;
+      if (r.status === 404 || r.status === 429 || r.status === 503) continue;
       if (!r.ok) return res.status(r.status).json({ error: data.error?.message || 'Gemini error' });
       const reply = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join(' ').trim();
       return res.status(200).json({ reply: reply || '...sorry, what was that?', model });
