@@ -36,12 +36,14 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
+renderer.xr.setFoveation(1.0); // fixed foveated rendering for Quest GPU headroom
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 const skyColor = new THREE.Color(0xdde8f5);
 scene.background = skyColor;
-scene.fog = new THREE.Fog(0xdde8f5, 6, 18);
+const envFog = new THREE.Fog(0xdde8f5, 6, 18);
+scene.fog = envFog;
 
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.01, 60);
 camera.position.set(0, 1.2, 0);
@@ -711,6 +713,11 @@ window.addEventListener('keydown', e => {
   if (e.key === 'c') enterCalmCorner();
 });
 
+const GAZE_SECONDS = 2.0;
+const gazeOrigin = new THREE.Vector3(), gazeDir = new THREE.Vector3();
+let gazeTarget = null, gazeTime = 0, gazeArmed = true, gazeDt = 0;
+const gazeRing = new THREE.Mesh(new THREE.RingGeometry(0.012, 0.018, 32), new THREE.MeshBasicMaterial({ color: 0xf3c86b, depthTest: false, transparent: true }));
+gazeRing.renderOrder = 10; gazeRing.visible = false; scene.add(gazeRing);
 function updateHover() {
   const hovered = new Set();
   if (renderer.xr.isPresenting) {
@@ -737,6 +744,21 @@ function updateHover() {
       if (touching) { hovered.add(touching); if (hand.userData.pokeArmed !== false) { hand.userData.pokeArmed = false; press(touching); } }
       else hand.userData.pokeArmed = true;
     }
+    // Gaze: look at a button for 2 seconds to select it (hands-free / accessibility)
+    const xrCam = renderer.xr.getCamera();
+    xrCam.getWorldPosition(gazeOrigin); xrCam.getWorldDirection(gazeDir);
+    raycaster.set(gazeOrigin, gazeDir);
+    const g = raycaster.intersectObjects(buttons, false)[0];
+    const target = g ? g.object : null;
+    if (target !== gazeTarget) { gazeTarget = target; gazeTime = 0; }
+    if (!target) gazeArmed = true;
+    if (target && gazeArmed) {
+      gazeTime += gazeDt; hovered.add(target);
+      gazeRing.visible = true; gazeRing.position.copy(g.point); gazeRing.quaternion.copy(target.getWorldQuaternion(new THREE.Quaternion()));
+      gazeRing.translateZ(0.005);
+      gazeRing.scale.setScalar(0.2 + 0.8 * Math.min(1, gazeTime / GAZE_SECONDS));
+      if (gazeTime >= GAZE_SECONDS) { gazeArmed = false; gazeTime = 0; press(target); }
+    } else gazeRing.visible = false;
   } else {
     raycaster.setFromCamera(mouse, camera);
     const hit = raycaster.intersectObjects(buttons, false)[0];
@@ -757,26 +779,38 @@ function startExperience() {
   begin();
 }
 
-enterVR.addEventListener('click', async () => {
-  if (!navigator.xr || !(await navigator.xr.isSessionSupported('immersive-vr').catch(() => false))) {
-    showToast('WebXR VR not available here. Open this page in Meta Quest Browser — or use desktop preview.');
+let mrMode = false;
+function setMixedReality(on) {
+  mrMode = on;
+  // passthrough: hide virtual rooms, keep characters, UI and garden in the user's real space
+  for (const group of [office, park, calm]) group.children.forEach(c => { if (c.userData.env) c.visible = !on; });
+  scene.background = on ? null : skyColor;
+  scene.fog = on ? null : envFog;
+  renderer.setClearAlpha(on ? 0 : 1);
+}
+async function startSession(mode) {
+  if (!navigator.xr || !(await navigator.xr.isSessionSupported(mode).catch(() => false))) {
+    showToast(mode === 'immersive-ar' ? 'Passthrough not available here. Open in Meta Quest Browser.' : 'WebXR VR not available here. Open this page in Meta Quest Browser — or use desktop preview.');
     return;
   }
   try {
-    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    const session = await navigator.xr.requestSession(mode, { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    setMixedReality(mode === 'immersive-ar');
     await renderer.xr.setSession(session);
     startScreen.classList.add('hidden');
     placeUiNextFrame = true;
     startExperience();
-    session.addEventListener('end', () => { startScreen.classList.remove('hidden'); try { speechSynthesis.cancel(); } catch { /* */ } });
+    session.addEventListener('end', () => { setMixedReality(false); startScreen.classList.remove('hidden'); try { speechSynthesis.cancel(); } catch { /* */ } });
     // clean pause/resume: when the system menu opens, pause speech
     session.addEventListener('visibilitychange', () => {
       try { if (session.visibilityState !== 'visible') speechSynthesis.pause(); else speechSynthesis.resume(); } catch { /* */ }
     });
   } catch (err) {
-    showToast(`Unable to start VR: ${err.message}`);
+    showToast(`Unable to start: ${err.message}`);
   }
-});
+}
+enterVR.addEventListener('click', () => startSession('immersive-vr'));
+document.querySelector('#enter-mr')?.addEventListener('click', () => startSession('immersive-ar'));
 enterDesktop.addEventListener('click', () => {
   startScreen.classList.add('hidden');
   startExperience();
@@ -806,11 +840,26 @@ renderer.setAnimationLoop(() => {
     }
   }
 
+  gazeDt = dt;
+  // FoV-aware: if the user turns away (>40°), the dialogue gently re-centers in front of them
+  if (renderer.xr.isPresenting && !placeUiNextFrame) {
+    const cam = renderer.xr.getCamera();
+    cam.getWorldDirection(gazeDir);
+    const headYaw = Math.atan2(-gazeDir.x, -gazeDir.z);
+    let diff = headYaw - ui.rotation.y;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    if (Math.abs(diff) > 0.7) ui.userData.following = true;
+    if (ui.userData.following) {
+      ui.rotation.y += diff * Math.min(1, dt * 2.5);
+      if (Math.abs(diff) < 0.05) ui.userData.following = false;
+    }
+  }
+
   // weather blend
   const w = weatherTargets[weather];
   targetSky.setHex(w.sky);
   skyColor.lerp(targetSky, dt * 1.5);
-  scene.fog.color.copy(skyColor);
+  envFog.color.copy(skyColor);
   sun.intensity += (w.sun - sun.intensity) * dt * 1.5;
   if (rain.visible) {
     const p = rain.geometry.attributes.position;
@@ -853,6 +902,8 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
+const keep = new Set([therapist, garden, maya, leo, trunk, mirrorYou]);
+for (const group of [office, park, calm]) group.children.forEach(c => { if (!keep.has(c)) c.userData.env = true; });
 goTo('office');
 camera.rotation.set(pitch, yaw, 0, 'YXZ');
 drawPanel('system', 'Welcome to Safe Space.');
