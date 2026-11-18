@@ -370,11 +370,7 @@ function setChoices(choices) {
   clearButtons();
   choices.forEach((ch, i) => {
     const color = ch.color || '#5b65c7';
-    const m = new THREE.Mesh(new THREE.BoxGeometry(BTN_W, BTN_H, 0.02), [
-      mat(0x41499e), mat(0x41499e), mat(0x41499e), mat(0x41499e),
-      new THREE.MeshBasicMaterial({ map: makeButtonTexture(ch.label, color, false) }), mat(0x41499e)
-    ]);
-    m.material = m.material[4]; // simple: textured face only (box keeps depth for poke)
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(BTN_W, BTN_H), new THREE.MeshBasicMaterial({ map: makeButtonTexture(ch.label, color, false), side: THREE.DoubleSide }));
     m.userData = { action: ch.action, baseTex: m.material.map, hoverTex: makeButtonTexture(ch.label, color, true) };
     const col = choices.length === 1 ? 0 : (i % 2 ? 1 : -1);
     const row = Math.floor(i / 2);
@@ -386,7 +382,7 @@ function setChoices(choices) {
 
 // Always-available utility buttons (left side)
 function utilButton(label, y, action) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.02), new THREE.MeshBasicMaterial({ map: makeButtonTexture(label, '#7b819c', false) }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.07), new THREE.MeshBasicMaterial({ map: makeButtonTexture(label, '#7b819c', false), side: THREE.DoubleSide }));
   m.userData = { action, baseTex: m.material.map, hoverTex: makeButtonTexture(label, '#7b819c', true), util: true };
   m.position.set(-0.62, y, -0.85); m.rotation.y = 0.55;
   ui.add(m); return m;
@@ -690,7 +686,7 @@ canvas.addEventListener('pointerdown', () => {
   if (hit) press(hit.object);
 });
 // Desktop look-around (drag) for previews
-let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0;
+let yaw = 0, pitch = -0.28, dragging = false, lastX = 0, lastY = 0;
 canvas.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
 window.addEventListener('pointerup', () => { dragging = false; });
 window.addEventListener('pointermove', e => {
@@ -849,4 +845,5 @@ renderer.setAnimationLoop(() => {
 });
 
 goTo('office');
+camera.rotation.set(pitch, yaw, 0, 'YXZ');
 drawPanel('system', 'Welcome to Safe Space.');
