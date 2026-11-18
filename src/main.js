@@ -592,6 +592,12 @@ function mayaHint() {
 }
 function mayaRespond() {
   say('therapist', 'Now, how would you like to respond to Maya?', [
+    { label: '🎙 Say it out loud to Maya', color: '#2f856a', action: () => toneCheck('Say something gentle to Maya, like: you seem a bit nervous, want to slow down?', r => {
+      const top = (r.expressions || []).map(e => e.name).join(' ') + ' ' + (r.voice || []).map(e => e.name).join(' ');
+      const gentle = STEADY.test(top) && !/anger|annoy|contempt|harsh|loud|tense/i.test(top);
+      if (gentle) { maya.userData.mood = 1; save.trust.maya += 1; writeSave(); say('maya', `Yeah. Yeah, actually. Sorry — I mean… thank you. (${describeTone(r)})`, [{ label: 'Continue', action: mayaDebrief }]); }
+      else say('therapist', `${describeTone(r)} Maya may hear that as pressure. Try a softer, slower voice — the words matter less than the warmth.`, [{ label: 'Try again', action: mayaRespond }]);
+    }, mayaRespond) },
     { label: '"You seem a bit nervous. Want to slow down?"', action: () => { maya.userData.mood = 1; save.trust.maya += 1; writeSave(); say('maya', 'Yeah. Yeah, actually. Sorry — I mean… thank you.', [{ label: 'Continue', action: mayaDebrief }]); } },
     { label: '"Can you stop apologizing?"', action: () => { maya.userData.mood = -1; say('maya', 'Oh. Sorry — I mean… okay.', [{ label: 'Hmm…', action: () => say('therapist', 'That was honest, but it may have landed hard. She already feels self-conscious. Want to try a softer way?', [{ label: 'Try again', action: () => { maya.userData.mood = 0; mayaRespond(); } }]) }]); } },
     { label: '"So… what do you do?"', action: () => say('maya', 'Oh! I — I study design. Sorry. Yeah.', [{ label: 'Hmm…', action: () => say('therapist', 'That kept things moving, but she is still on edge. Naming the feeling gently can help her relax.', [{ label: 'Try again', action: mayaRespond }]) }]) }
