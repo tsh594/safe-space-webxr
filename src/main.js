@@ -292,6 +292,20 @@ function wearOutfit(name) {
 let voiceOn = true;
 const voices = { therapist: { pitch: 0.9, rate: 0.92 }, maya: { pitch: 1.35, rate: 1.12 }, leo: { pitch: 0.75, rate: 1.05 }, guide: { pitch: 1.0, rate: 0.9 } };
 let speakingChar = null;
+// Prefer high-quality natural voices (Edge "Online (Natural)", Google) — distinct voice per character
+const VOICE_PREFS = {
+  therapist: [/Andrew.*Natural/i, /Guy.*Natural/i, /Brian.*Natural/i, /Christopher.*Natural/i, /Natural.*Male/i, /Google UK English Male/i],
+  guide: [/Emma.*Natural/i, /Aria.*Natural/i, /Jenny.*Natural/i, /Google US English/i],
+  maya: [/Ana.*Natural/i, /Jenny.*Natural/i, /Michelle.*Natural/i, /Aria.*Natural/i, /Google US English/i],
+  leo: [/Davis.*Natural/i, /Eric.*Natural/i, /Roger.*Natural/i, /Steffan.*Natural/i, /Guy.*Natural/i, /Google UK English Male/i]
+};
+function pickVoice(who) {
+  let list = [];
+  try { list = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang)); } catch { return null; }
+  for (const re of VOICE_PREFS[who] || VOICE_PREFS.therapist) { const v = list.find(x => re.test(x.name)); if (v) return v; }
+  return list.find(x => /natural|neural|online/i.test(x.name)) || null;
+}
+try { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); } catch { /* */ }
 function speak(text, who = 'therapist') {
   speakingChar = who;
   if (!voiceOn || !('speechSynthesis' in window)) return;
@@ -299,6 +313,8 @@ function speak(text, who = 'therapist') {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text.replace(/[—–]/g, ', '));
     Object.assign(u, voices[who] || voices.therapist);
+    const v = pickVoice(who);
+    if (v) { u.voice = v; if (/natural|neural|online|google/i.test(v.name)) u.pitch = 1; }
     u.onend = () => { speakingChar = null; };
     speechSynthesis.speak(u);
   } catch { /* speech not available */ }
