@@ -229,6 +229,7 @@ leo.position.set(1.3, 0, -2.6); leo.rotation.y = -0.46; leo.visible = false;
 park.add(leo);
 
 // Therapist — Meshy-generated scan, finished in Blender (rig pose + hair) and exported as GLB
+let therapistMixer = null;
 const therapist = new THREE.Group();
 therapist.position.set(-1.3, 0, -2.25);
 therapist.rotation.y = 0.46;
@@ -253,6 +254,12 @@ new GLTFLoader().load(`${import.meta.env.BASE_URL}therapist.glb`, gltf => {
   therapist.position.z = -2.6;
   therapist.userData.model = model;
   therapist.add(model);
+  if (gltf.animations && gltf.animations.length) {
+    // Meshy rig/animate exports: prefer an idle clip, else the first one
+    const clip = gltf.animations.find(c => /idle|breath|stand/i.test(c.name)) || gltf.animations[0];
+    therapistMixer = new THREE.AnimationMixer(model);
+    therapistMixer.clipAction(clip).play();
+  }
 }, undefined, () => { /* fallback figure stays */ });
 
 // Trunk of identities + mirror ("you")
@@ -840,6 +847,7 @@ renderer.setAnimationLoop(() => {
     }
   });
 
+  therapistMixer?.update(dt);
   updateHover();
   renderer.render(scene, camera);
 });
