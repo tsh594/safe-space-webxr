@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import './style.css';
@@ -237,7 +238,7 @@ office.add(therapist);
 const therapistFallback = makeFigure({ skin: 0xaa7057, shirt: 0x59669c, hair: 0x2a1d18, seated: true });
 therapistFallback.position.z = -0.1;
 therapist.add(therapistFallback);
-new GLTFLoader().load(`${import.meta.env.BASE_URL}therapist.glb`, gltf => {
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(`${import.meta.env.BASE_URL}therapist.glb`, gltf => {
   const model = gltf.scene;
   const bbox = new THREE.Box3().setFromObject(model);
   const height = bbox.max.y - bbox.min.y;
