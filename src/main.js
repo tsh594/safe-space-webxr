@@ -4,6 +4,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import './style.css';
+import { measureTone, ensureMic } from './tone.js';
 
 /* =========================================================
    Safe Space — a seated, hands-first place to practice being human.
@@ -491,8 +492,37 @@ function begin() {
   }
 }
 
+/* ---------- Tone Coach (Hume Expression Measurement via our server relay) ---------- */
+const ANXIOUS = /anxi|distress|fear|nerv|awkward|confus|doubt|sad|tired|embarrass|horror|pain/i;
+const STEADY = /calm|content|relief|determin|concentrat|interest|clear|steady|confident|warm|soft|joy|satisf/i;
+function describeTone(r) {
+  const ex = (r.expressions || []).map(e => `${e.name} ${Math.round(e.p * 100)}%`).join(', ') || 'no clear expression';
+  const vo = (r.voice || []).map(e => e.name).join(', ');
+  return `Hume heard: ${ex}${vo ? `. Voice: ${vo}` : ''}.`;
+}
+function toneCheck(promptText, onResult, onCancel) {
+  clearButtons();
+  drawPanel('guide', `🎙 ${promptText} — speak now (4 seconds)…`);
+  speak('Speak now.', 'guide');
+  setTimeout(() => {
+    measureTone(4).then(r => onResult(r)).catch(err => {
+      say('guide', `Tone Coach is unavailable right now (${err.message}). No problem — you can choose with buttons instead.`, [{ label: 'Continue', action: onCancel }]);
+    });
+    setTimeout(() => drawPanel('guide', '⏳ Listening… then asking Hume how your voice sounded.'), 4000);
+  }, 900);
+}
+
 function checkIn() {
   say('therapist', 'Before we start — how are you arriving today?', [
+    { label: '🎙 Say it out loud (Tone Coach)', color: '#2f856a', action: () => toneCheck('Tell me how you are feeling today', r => {
+      const top = (r.expressions || []).map(e => e.name).join(' ') + ' ' + (r.voice || []).map(e => e.name).join(' ');
+      const anxious = ANXIOUS.test(top);
+      setWeather(anxious ? 'nervous' : 'calm');
+      say('therapist', `${describeTone(r)} ${anxious ? 'I hear some tension in your voice. Let us breathe together first.' : 'You sound fairly settled. A good place to begin.'}`, [
+        anxious ? { label: 'Breathe with me', action: () => breathing(3, intro) } : { label: 'Continue', action: intro },
+        { label: 'Skip', action: intro }
+      ]);
+    }, checkIn) },
     { label: "I'm nervous", action: () => { setWeather('nervous'); say('therapist', 'Thank you for telling me. Most people are. Let us take three slow breaths together first.', [{ label: 'Breathe with me', action: () => breathing(3, intro) }, { label: 'Skip for now', action: intro }]); } },
     { label: 'I feel calm', action: () => { setWeather('calm'); say('therapist', 'That is a good place to begin. Notice the sun in the room? The world here reflects how you feel.', [{ label: 'Continue', action: intro }]); } },
     { label: "I'm not sure", action: () => { setWeather('unsure'); say('therapist', 'That is okay. You do not have to know yet. Want to take a few slow breaths?', [{ label: 'Breathe with me', action: () => breathing(3, intro) }, { label: 'Let us start', action: intro }]); } }
@@ -590,6 +620,12 @@ function leoScene() {
 }
 function leoPush() {
   say('leo', 'Look — get to the point. What do you want?', [
+    { label: '🎙 Say it out loud to Leo', color: '#2f856a', action: () => toneCheck('Say to Leo, calmly: I would like two minutes, then I will let you go', r => {
+      const top = (r.expressions || []).map(e => e.name).join(' ') + ' ' + (r.voice || []).map(e => e.name).join(' ');
+      const steady = STEADY.test(top) && !ANXIOUS.test((r.expressions || [])[0]?.name || '');
+      if (steady) { save.trust.leo += 1; leo.userData.mood = 1; say('leo', `…Fair. Two minutes. Go. (${describeTone(r)})`, [{ label: 'Continue', action: () => unlockInsight('leo-voice', 'Your voice held steady. Leo respects calm and clear — and you said it out loud.', leoDebrief) }]); }
+      else say('therapist', `${describeTone(r)} Leo might hear that as hesitation. Try again — slower, lower, and breathe out before you speak.`, [{ label: 'Try again', action: leoPush }]);
+    }, leoPush) },
     { label: 'Calm & clear: "Two minutes, then I\'ll let you go."', action: () => { save.trust.leo += 1; leo.userData.mood = 1; say('leo', '…Fair. Two minutes. Go.', [{ label: 'Continue', action: () => unlockInsight('leo-direct', 'Leo respects directness. Calm and clear beats loud. Holding your ground does not require raising your voice.', leoDebrief) }]); } },
     { label: 'Apologize and leave', action: () => say('therapist', 'Walking away is always allowed. But you did nothing wrong. Want to try holding your ground — gently?', [{ label: 'Try again', action: leoPush }]) },
     { label: 'Snap back: "Don\'t talk to me like that!"', action: () => { leo.userData.mood = -1; say('leo', "Whoa. Okay. Forget it then.", [{ label: 'Hmm…', action: () => say('therapist', 'Matching his energy escalated things. When someone pushes, slowing down gives you control.', [{ label: 'Try again', action: () => { leo.userData.mood = 0; leoPush(); } }]) }]); } }
@@ -907,3 +943,6 @@ for (const group of [office, park, calm]) group.children.forEach(c => { if (!kee
 goTo('office');
 camera.rotation.set(pitch, yaw, 0, 'YXZ');
 drawPanel('system', 'Welcome to Safe Space.');
+document.querySelector('#enable-mic')?.addEventListener('click', () => {
+  ensureMic().then(() => showToast('Microphone ready — Tone Coach on (powered by Hume)')).catch(e => showToast(`Microphone blocked: ${e.message}`));
+});
